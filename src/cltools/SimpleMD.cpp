@@ -494,7 +494,7 @@ class SimpleMD : public PLMD::CLTool {
                 const double arg6 = arg5 * arg;
                 // this is the U
                 engconf += (arg > 0 ? -kappa / (1 + arg6) : -kappa);
-                auto f = (arg > 0 ? kappa * 6 * arg5 / pow(1 + arg6, 2) : 0) * distance;
+                auto f = (arg > 0 ? kappa * 6 * arg5 / pow(1 + arg6, 2) : 0) * distance / modu;
 
                 omp_forces[i] += f;
                 omp_forces[j] -= f;
