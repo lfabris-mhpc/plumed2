@@ -370,14 +370,14 @@ class SimpleMD : public PLMD::CLTool {
                 double kappa = bonds_kappa[iter];
 
                 auto distance = positions[j] - positions[i];
-                Vector distance_pbc;// minimum-image distance of the two atoms
+                Vector distance_pbc;
                 pbc(cell, distance, distance_pbc);
+                distance = distance_pbc;
 
-                const double modu = distance_pbc.modulo();
-                const double arg = modu - ref;
-                // this is the U
-                engconf += 0.5 * kappa * arg * arg;
-                auto f = kappa * arg / modu * distance_pbc;
+                const double modu = distance.modulo();
+                const double diff = modu - ref;
+                engconf += 0.5 * kappa * diff * diff;
+                auto f = kappa * diff / modu * distance;
 
                 omp_forces[i] += f;
                 omp_forces[j] -= f;
@@ -392,21 +392,22 @@ class SimpleMD : public PLMD::CLTool {
                 double ref = angles_ref[iter];
                 double kappa = angles_kappa[iter];
 
-                // i--j--k
+                Vector dji, djk;
+                // i <-dji- j -djk-> k
                 auto rji = delta(positions[j], positions[i]);
                 auto rjk = delta(positions[j], positions[k]);
-                PLMD::Vector dji, djk;
                 double theta = angle_helper.compute(rji, rjk, dji, djk);
+                const double diff = theta - ref;
 
-                // this is the U due to the bond
-                const double arg = theta - ref;
-                engconf += 0.5 * kappa * arg * arg;
-                auto fji = kappa * arg * dji;
-                auto fjk = kappa * arg * djk;
+                engconf += 0.5 * kappa * diff * diff;
+                const double mult = kappa * diff;
 
-                omp_forces[i] -= fji;
-                omp_forces[j] += fji + fjk;
-                omp_forces[k] -= fjk;
+                dji *= mult;
+                djk *= mult;
+
+                omp_forces[i] -= dji;
+                omp_forces[j] += dji + djk;
+                omp_forces[k] -= djk;
             }
 
             const Torsion torsion_helper;
@@ -419,64 +420,40 @@ class SimpleMD : public PLMD::CLTool {
                 double ref = torsions_ref[iter];
                 double kappa = torsions_kappa[iter];
 
-                // i--j--k--w
+                // i <-d0- j <-d1- k <-d2- w
                 Vector d0, d1, d2;
-                // if (pbc) makeWhole();
+                Vector dd0, dd1, dd2;
+
                 d0 = delta(positions[j], positions[i]);
                 d1 = delta(positions[k], positions[j]);
                 d2 = delta(positions[w], positions[k]);
-                Vector dd0, dd1, dd2;
                 double theta = torsion_helper.compute(d0, d1, d2, dd0, dd1, dd2);
+                const double diff = theta - ref;
+
+                // as used in other files - multicolvar/DihedralCorrelation
+                engconf += 0.5 * (1. + std::cos(diff));
+                // lost 0.5, gained a kappa; it's an hybrid of the potential derivative and the
+                // harmonic restraint
+                const double mult = -kappa * std::sin(diff);
+
+                dd0 *= mult;
+                dd1 *= mult;
+                dd2 *= mult;
+
                 /*
-                if(do_cosine) {
-                    dd0 *= -sin(torsion);
-                    dd1 *= -sin(torsion);
-                    dd2 *= -sin(torsion);
-                    torsion = cos(torsion);
+                if (!iter) {
+                    printf("torsion theta %lf ref %lf kappa %lf\n", theta, ref, kappa);
+                    std::cout << "d0 " << d0 << " d1 " << d1 << " d2 " << d2 << std::endl;
+                    std::cout << "dd0 " << dd0 << " dd1 " << dd1 << " dd2 " << dd2 << std::endl;
+                    std::cout << std::endl;
                 }
                 */
-                const double arg = sin(theta - ref);
-                /*
-                for (int n = n; n < 4; ++n) {
-                    engconf += kappa * (1 - std::cos(n * theta));
-                }
-                */
 
-                dd0 *= -sin(theta);
-                dd1 *= -sin(theta);
-                dd2 *= -sin(theta);
-                omp_forces[i] += kappa * arg * dd0;
-                omp_forces[j] += kappa * arg * (dd1 - dd0);
-                omp_forces[k] += kappa * arg * (dd2 - dd1);
-                omp_forces[w] += kappa * arg * -dd2;
-                /*
-                setAtomsDerivatives(0, dd0);
-                setAtomsDerivatives(1, -dd0);
-                setAtomsDerivatives(2, dd1);
-                setAtomsDerivatives(3, -dd1);
-                setAtomsDerivatives(4, dd2);
-                setAtomsDerivatives(5, -dd2);
-                */
-                /*
-                auto rji = delta(positions[j], positions[i]);
-                auto axis = delta(positions[j], positions[k]);
-                auto rkw = delta(positions[k], positions[w]);
-                PLMD::Vector dji, daxis, dkw;
-                double theta = torsion_helper.compute(rji, axis, rkw, dji, daxis, dkw);
-
-                // this is the U due to the bond
-                const double arg = theta - ref;
-                engconf += 0.5 * kappa * arg * arg;
-                // how to use dji and dkw?
-                auto fji = kappa * arg * dji;
-                auto faxis = kappa * arg * daxis;
-                auto fkw = kappa * arg * dkw;
-
-                omp_forces[i] -= fji;
-                omp_forces[j] += fji + faxis;// + faxis;
-                omp_forces[k] += fkw - faxis;//-faxis + ;
-                omp_forces[w] -= fkw;
-                */
+                // signs are flipped wrt angles procedure
+                omp_forces[i] += dd0;
+                omp_forces[j] += dd1 - dd0;
+                omp_forces[k] += dd2 - dd1;
+                omp_forces[w] -= dd2;
             }
 
 #pragma omp for reduction(+ : engconf) schedule(static, 1) nowait
