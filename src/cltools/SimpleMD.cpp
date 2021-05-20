@@ -431,7 +431,7 @@ class SimpleMD : public PLMD::CLTool {
                 const double diff = theta - ref;
 
                 // as used in other files - multicolvar/DihedralCorrelation
-                engconf += 0.5 * (1. + std::cos(diff));
+                engconf += kappa * (1. + std::cos(diff));
                 // lost 0.5, gained a kappa; it's an hybrid of the potential derivative and the
                 // harmonic restraint
                 const double mult = -kappa * std::sin(diff);
