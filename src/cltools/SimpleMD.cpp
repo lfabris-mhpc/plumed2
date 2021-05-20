@@ -330,11 +330,15 @@ class SimpleMD : public PLMD::CLTool {
                  pow(forcecutoff2 / (sigma * sigma),
                      3));// energy necessary shift the potential avoiding discontinuities
 
+        const double lj_mult_en = 4.0 * epsilon;
+        const double lj_mult_f = 6.0 * lj_mult_en / sigma;
+
 #pragma omp parallel num_threads(OpenMP::getNumThreads())
         {
             std::vector<Vector> omp_forces(forces.size());
 
-#pragma omp for reduction(+ : engconf) schedule(static, 1) nowait
+#define scheduling schedule(static, 1) nowait
+#pragma omp for reduction(+ : engconf) scheduling
             for (int iatom = 0; iatom < natoms - 1; iatom++) {
                 for (int jlist = 0; jlist < list[iatom].size(); jlist++) {
                     const int jatom = list[iatom][jlist];
@@ -353,16 +357,15 @@ class SimpleMD : public PLMD::CLTool {
                     auto distance_pbcm8 = distance_pbcm6 * distance_pbcm2;
                     auto distance_pbcm12 = distance_pbcm6 * distance_pbcm6;
                     auto distance_pbcm14 = distance_pbcm12 * distance_pbcm2;
-                    engconf += 4.0 * epsilon * (distance_pbcm12 - distance_pbcm6) - engcorrection;
-                    auto f = 24.0 * distance_pbc * (2.0 * distance_pbcm14 - distance_pbcm8) *
-                        epsilon / sigma;
+                    engconf += lj_mult_en * (distance_pbcm12 - distance_pbcm6) - engcorrection;
+                    auto f = lj_mult_f * distance_pbc * (2.0 * distance_pbcm14 - distance_pbcm8);
 
                     omp_forces[iatom] += f;
                     omp_forces[jatom] -= f;
                 }
             }
 
-#pragma omp for reduction(+ : engconf) schedule(static, 1) nowait
+#pragma omp for reduction(+ : engconf) scheduling
             for (int iter = 0; iter < bonds_i.size(); ++iter) {
                 int i = bonds_i[iter];
                 int j = bonds_j[iter];
@@ -384,7 +387,7 @@ class SimpleMD : public PLMD::CLTool {
             }
 
             const Angle angle_helper;
-#pragma omp for reduction(+ : engconf) schedule(static, 1) nowait
+#pragma omp for reduction(+ : engconf) scheduling
             for (int iter = 0; iter < angles_i.size(); ++iter) {
                 int i = angles_i[iter];
                 int j = angles_j[iter];
@@ -411,7 +414,7 @@ class SimpleMD : public PLMD::CLTool {
             }
 
             const Torsion torsion_helper;
-#pragma omp for reduction(+ : engconf) schedule(static, 1) nowait
+#pragma omp for reduction(+ : engconf) scheduling
             for (int iter = 0; iter < torsions_i.size(); ++iter) {
                 int i = torsions_i[iter];
                 int j = torsions_j[iter];
@@ -456,7 +459,7 @@ class SimpleMD : public PLMD::CLTool {
                 omp_forces[w] -= dd2;
             }
 
-#pragma omp for reduction(+ : engconf) schedule(static, 1) nowait
+#pragma omp for reduction(+ : engconf) scheduling
             for (int iter = 0; iter < pairs_i.size(); ++iter) {
                 int i = pairs_i[iter];
                 int j = pairs_j[iter];
