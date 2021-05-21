@@ -333,11 +333,30 @@ class SimpleMD : public PLMD::CLTool {
         const double lj_mult_en = 4.0 * epsilon;
         const double lj_mult_f = 6.0 * lj_mult_en / sigma;
 
-#pragma omp parallel num_threads(OpenMP::getNumThreads())
-        {
-            std::vector<Vector> omp_forces(forces.size());
+#define _REDUX_EXP 0
+#define _SCHED_STATIC 1
 
+#if _REDUX_EXP
+#define redux
+#else
+#define redux reduction(stdvec_Vector_plus : forces)
+#define omp_forces forces
+#endif
+
+#if _SCHED_STATIC
 #define scheduling schedule(static, 1) nowait
+#else
+#define scheduling schedule(dynamic)
+#endif
+
+#pragma omp declare reduction(stdvec_Vector_plus : std::vector<Vector> :  std::transform(omp_out.begin(), omp_out.end(), omp_in.begin(), omp_out.begin(), std::plus<Vector>())) initializer(omp_priv = omp_orig)
+
+#pragma omp parallel num_threads(OpenMP::getNumThreads()) redux
+        {
+#if _REDUX_EXP
+            std::vector<Vector> omp_forces(forces.size());
+#endif
+
 #pragma omp for reduction(+ : engconf) scheduling
             for (int iatom = 0; iatom < natoms - 1; iatom++) {
                 for (int jlist = 0; jlist < list[iatom].size(); jlist++) {
@@ -435,8 +454,8 @@ class SimpleMD : public PLMD::CLTool {
 
                 // as used in other files - multicolvar/DihedralCorrelation
                 engconf += kappa * (1. + std::cos(diff));
-                // lost 0.5, gained a kappa; it's an hybrid of the potential derivative and the
-                // harmonic restraint
+                // lost 0.5, gained a kappa; it's an hybrid of the potential derivative
+                // and the harmonic restraint
                 const double mult = -kappa * std::sin(diff);
 
                 dd0 *= mult;
@@ -447,8 +466,8 @@ class SimpleMD : public PLMD::CLTool {
                 if (!iter) {
                     printf("torsion theta %lf ref %lf kappa %lf\n", theta, ref, kappa);
                     std::cout << "d0 " << d0 << " d1 " << d1 << " d2 " << d2 << std::endl;
-                    std::cout << "dd0 " << dd0 << " dd1 " << dd1 << " dd2 " << dd2 << std::endl;
-                    std::cout << std::endl;
+                    std::cout << "dd0 " << dd0 << " dd1 " << dd1 << " dd2 " << dd2 <<
+                std::endl; std::cout << std::endl;
                 }
                 */
 
@@ -480,10 +499,12 @@ class SimpleMD : public PLMD::CLTool {
                 omp_forces[j] -= f;
             }
 
+#if _REDUX_EXP
 #pragma omp critical
             for (unsigned i = 0; i < omp_forces.size(); i++) {
                 forces[i] += omp_forces[i];
             }
+#endif
         }
     }
 
